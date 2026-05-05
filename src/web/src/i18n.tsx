@@ -444,10 +444,10 @@ function readLang(): Lang {
 }
 
 function readTheme(): Theme {
-  if (typeof localStorage === "undefined") return "dark";
+  if (typeof localStorage === "undefined") return "light";
   const saved = localStorage.getItem("theme");
   if (saved === "light" || saved === "dark") return saved;
-  return "dark";
+  return "light";
 }
 
 function format(template: string, vars?: Record<string, string | number>): string {
