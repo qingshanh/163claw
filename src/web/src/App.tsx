@@ -7,6 +7,7 @@ import { ListenersDrawer } from "./components/ListenersDrawer";
 import { MailboxesView } from "./components/MailboxesView";
 import { useResizableWidth } from "./hooks";
 import { PrefsBar, usePrefs } from "./i18n";
+import { isRootMailboxForAccount } from "./mailboxTree";
 import {
   createEventSource,
   createMailbox,
@@ -113,12 +114,9 @@ export function App() {
   );
 
   const childMailboxes = useMemo(() => {
-    const rootEmails = new Set(
-      accounts
-        .map((account) => account.root_prefix && account.domain ? `${account.root_prefix}@${account.domain}`.toLowerCase() : "")
-        .filter(Boolean)
+    return activeMailboxes.filter(
+      (mailbox) => !accounts.some((account) => isRootMailboxForAccount(mailbox, account))
     );
-    return activeMailboxes.filter((mailbox) => !rootEmails.has(mailbox.email.toLowerCase()));
   }, [accounts, activeMailboxes]);
 
   const listenerSummary = useMemo(() => {
@@ -228,7 +226,7 @@ export function App() {
     setAdminPassword(password);
     loadAccounts().catch(reportError);
     loadClawAuthStatus().catch(reportError);
-    loadMailboxes().catch(reportError);
+    loadMailboxes(true).catch(reportError);
   }, [password]);
 
   useEffect(() => {
@@ -356,7 +354,7 @@ export function App() {
       setClawLoginCode("");
       setClawCodeSent(false);
       setStatus(t("flash.claw.bound", { n: result.syncedMailboxes }));
-      await loadMailboxes();
+      await loadMailboxes(true);
     } catch (err) {
       reportError(err);
     } finally {
@@ -370,7 +368,7 @@ export function App() {
       const result = await refreshClawConnection();
       setClawAuth(result.auth);
       setStatus(t("flash.claw.refreshed", { n: result.syncedMailboxes }));
-      await loadMailboxes();
+      await loadMailboxes(true);
       loadListeners();
     } catch (err) {
       reportError(err);

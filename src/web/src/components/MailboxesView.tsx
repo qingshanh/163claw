@@ -1,5 +1,6 @@
 import type { Account, ClawAuthStatus, Mailbox } from "../api";
 import { usePrefs } from "../i18n";
+import { groupMailboxesByAccount, isRootMailboxForAccount, rootMailboxEmail } from "../mailboxTree";
 import { parseServerTime } from "../time";
 
 type Props = {
@@ -43,10 +44,7 @@ function ruleLabel(mailbox: Mailbox, t: (key: string) => string): string {
 }
 
 function clawEmail(account: Account | null): string | null {
-  if (!account) return null;
-  if (account.root_prefix && account.domain) return `${account.root_prefix}@${account.domain}`;
-  if (account.user_email?.endsWith("@claw.163.com")) return account.user_email;
-  return null;
+  return rootMailboxEmail(account);
 }
 
 export function MailboxesView({
@@ -70,22 +68,7 @@ export function MailboxesView({
   const domain = selectedAccount?.domain ?? (clawAuth?.domain || null);
   const canCreate = Boolean(rootPrefix && domain);
 
-  const isPrimary = (m: Mailbox): boolean => {
-    const account = accounts.find((item) => item.id === Number(m.account_id));
-    const rootEmail = account?.root_prefix && account?.domain
-      ? `${account.root_prefix}@${account.domain}`
-      : clawAuth?.rootPrefix && clawAuth?.domain
-        ? `${clawAuth.rootPrefix}@${clawAuth.domain}`
-        : null;
-    return Boolean(rootEmail && m.email.toLowerCase() === rootEmail.toLowerCase());
-  };
-
-  const grouped = accounts.length > 0
-    ? accounts.map((account) => ({
-        account,
-        items: mailboxes.filter((mailbox) => Number(mailbox.account_id) === account.id && mailbox.email !== clawEmail(account))
-      }))
-    : [{ account: null, items: mailboxes }];
+  const grouped = groupMailboxesByAccount(accounts, mailboxes);
 
   return (
     <div className="stagger">
@@ -134,17 +117,36 @@ export function MailboxesView({
         </div>
       ) : (
         <div className="account-stack">
-          {grouped.map(({ account, items }) => (
+          {grouped.map(({ account, rootMailbox, childMailboxes }) => {
+            const rootEmail = clawEmail(account);
+            const shownRoot = rootMailbox ?? (rootEmail ? {
+              id: `root:${account?.id ?? "default"}:${rootEmail}`,
+              email: rootEmail,
+              prefix: rootEmail.split("@", 1)[0],
+              display_name: account?.name ?? null,
+              account_id: account?.id ? String(account.id) : null,
+              status: "active",
+              openclaw_status: null,
+              install_command: null,
+              auth_url: null,
+              comm_level: null,
+              ext_receive_type: null,
+              ext_send_type: null,
+              created_at: "",
+              updated_at: ""
+            } as Mailbox : null);
+            const rows = shownRoot ? [shownRoot, ...childMailboxes] : childMailboxes;
+            return (
             <section className="account-group" key={account?.id ?? "default"}>
               <div className="account-head">
                 <div>
-                  <strong>{clawEmail(account) || t("mb.row.primary")}</strong>
+                  <strong>{rootEmail || t("mb.row.primary")}</strong>
                   <span>{account?.registered_email ? `注册邮箱 ${account.registered_email}` : account?.user_email && !account.user_email.endsWith("@claw.163.com") ? `注册邮箱 ${account.user_email}` : account?.name || "default"}</span>
                 </div>
                 <div className="account-head-actions">
                   <span className={`tag ${account?.status?.hasApiKey ? "ok" : "muted"}`}>
                     <span className={`dot ${account?.status?.hasApiKey ? "live" : ""}`} />
-                    {items.length} boxes
+                    {childMailboxes.length} sub boxes
                   </span>
                   {account && (
                     <>
@@ -163,12 +165,14 @@ export function MailboxesView({
                   <span>{t("mb.head.created")}</span>
                   <span style={{ textAlign: "right" }}>{t("mb.head.ops")}</span>
                 </div>
-                {items.map((mailbox) => (
-                  <div className="mb-row" key={mailbox.id}>
+                {rows.map((mailbox) => {
+                  const primary = account ? isRootMailboxForAccount(mailbox, account) || mailbox.id.startsWith("root:") : false;
+                  return (
+                  <div className={`mb-row ${primary ? "main-mailbox-row" : "sub-mailbox-row"}`} key={mailbox.id}>
                     <div className="email-cell">
                       <span className="e">{mailbox.email}</span>
                       <span className="pref">
-                        {isPrimary(mailbox)
+                        {primary
                           ? t("mb.row.primary")
                           : t("mb.row.prefix", { p: mailbox.prefix })}
                       </span>
@@ -197,16 +201,30 @@ export function MailboxesView({
                       <button
                         className="danger"
                         onClick={() => onDelete(mailbox)}
-                        disabled={isPrimary(mailbox)}
+                        disabled={primary || mailbox.id.startsWith("root:")}
                       >
                         {t("mb.row.delete")}
                       </button>
                     </div>
                   </div>
-                ))}
+                );
+                })}
+                {account && childMailboxes.length === 0 && (
+                  <div className="mb-row empty-child-row">
+                    <div className="email-cell">
+                      <span className="e">{t("mb.empty.head")}</span>
+                      <span className="pref">{t("mb.empty.body")}</span>
+                    </div>
+                    <div />
+                    <div />
+                    <div />
+                    <div />
+                  </div>
+                )}
               </div>
             </section>
-          ))}
+          );
+          })}
         </div>
       )}
     </div>

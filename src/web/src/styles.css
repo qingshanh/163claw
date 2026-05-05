@@ -855,6 +855,20 @@ a:hover { color: var(--accent-fg); border-bottom-color: var(--accent-fg); }
   padding: 11px 16px;
 }
 .mb-row:last-child { border-bottom: 0; }
+.mb-row.main-mailbox-row {
+  background: var(--surface-2);
+}
+.mb-row.sub-mailbox-row .email-cell {
+  padding-left: 18px;
+  border-left: 2px solid var(--accent-soft);
+}
+.mb-row.empty-child-row {
+  color: var(--text-3);
+  background: transparent;
+}
+.mb-row.empty-child-row .email-cell .e {
+  color: var(--text-3);
+}
 .mb-row .email-cell { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .mb-row .email-cell .e {
   font-family: var(--font-mono);
