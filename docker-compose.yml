@@ -1,11 +1,11 @@
 services:
   claw-email:
-    image: ghcr.io/wangxingfan/clawemail:latest
+    image: 163clawmail:latest
     build: .
     container_name: claw-email
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "3600:3600"
     volumes:
       - ./data:/app/data
       - ./config.json:/app/config.json
