@@ -1,7 +1,11 @@
 services:
   claw-email:
     image: 163clawmail:latest
-    build: .
+    build:
+      context: .
+      args:
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmmirror.com}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
     container_name: claw-email
     restart: unless-stopped
     ports:

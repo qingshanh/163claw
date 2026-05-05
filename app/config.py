@@ -83,6 +83,7 @@ def _load_config_json_defaults() -> None:
     _set_env_if_unset("CLAW_PARENT_MAILBOX_ID", claw.get("parentMailboxId") or claw.get("parent_mailbox_id"))
     _set_env_if_unset("CLAW_ROOT_PREFIX", claw.get("rootPrefix") or claw.get("root_prefix"))
     _set_env_if_unset("CLAW_DOMAIN", claw.get("domain"))
+    _set_env_if_unset("CLAW_ORIGIN", claw.get("origin") or claw.get("apiBase") or claw.get("api_base"))
 
     if "CLAW_ACCOUNTS_JSON" not in _ORIGINAL_ENV:
         os.environ["CLAW_ACCOUNTS_JSON"] = str(CONFIG_FILE)
@@ -106,6 +107,7 @@ class Settings(BaseSettings):
     claw_parent_mailbox_id: str | None = Field(default=None, alias="CLAW_PARENT_MAILBOX_ID")
     claw_root_prefix: str | None = Field(default=None, alias="CLAW_ROOT_PREFIX")
     claw_domain: str = Field(default="claw.163.com", alias="CLAW_DOMAIN")
+    claw_origin: str = Field(default="https://claw.163.com", alias="CLAW_ORIGIN")
     claw_accounts_json: str | None = Field(default=None, alias="CLAW_ACCOUNTS_JSON")
 
     telegram_bot_token: str | None = Field(default=None, alias="TELEGRAM_BOT_TOKEN")

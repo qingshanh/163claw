@@ -13,6 +13,9 @@
     "chatId": "",
     "apiBase": "https://api.telegram.org"
   },
+  "claw": {
+    "origin": "https://claw.163.com"
+  },
   "accounts": [
     {
       "name": "main-account",

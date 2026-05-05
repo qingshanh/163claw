@@ -5,9 +5,10 @@ from typing import Any
 
 import httpx
 
+from .config import settings
 from .runtime_config import require_account
 
-DASHBOARD_ORIGIN = "https://claw.163.com"
+DASHBOARD_ORIGIN = settings.claw_origin.rstrip("/")
 BASE_URL = f"{DASHBOARD_ORIGIN}/mailserv-claw-dashboard/api/v1"
 PUBLIC_BASE_URL = f"{DASHBOARD_ORIGIN}/mailserv-claw-dashboard/p/v1"
 

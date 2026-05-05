@@ -118,6 +118,48 @@ def public_account(account: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _mask_email(value: str | None) -> str | None:
+    if not value or "@" not in value:
+        return value
+    name, domain = value.split("@", 1)
+    if len(name) <= 2:
+        masked = name[:1] + "*"
+    else:
+        masked = name[:2] + "*" * min(6, len(name) - 2)
+    return f"{masked}@{domain}"
+
+
+def _root_email_for_account(account: dict[str, Any]) -> str | None:
+    root_prefix = (account.get("root_prefix") or "").strip().lower()
+    domain = (account.get("domain") or "claw.163.com").strip().lower()
+    if root_prefix:
+        return f"{root_prefix}@{domain}"
+    user_email = (account.get("user_email") or "").strip().lower()
+    return user_email if user_email.endswith(f"@{domain}") else None
+
+
+def mailbox_sync_summary(account: dict[str, Any], remote: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    root_email = _root_email_for_account(account)
+    local = db.list_mailboxes(account_id=account["id"])
+    remote = remote or []
+    primary = primary_mailbox_from_items(account, remote)
+    return {
+        "accountId": account["id"],
+        "accountName": account.get("name"),
+        "rootEmail": _mask_email(root_email),
+        "hasApiKey": bool(account.get("api_key")),
+        "hasDashboardCookie": bool(account.get("dashboard_cookie")),
+        "hasWorkspaceId": bool(account.get("workspace_id")),
+        "parentMailboxId": account.get("parent_mailbox_id"),
+        "localTotal": len(local),
+        "localChildren": len([item for item in local if item.get("email") != root_email]),
+        "remoteTotal": len(remote),
+        "remoteChildren": len([item for item in remote if item.get("email") != (primary or {}).get("email")]),
+        "remotePrimaryId": (primary or {}).get("id"),
+        "remotePrimaryEmail": _mask_email((primary or {}).get("email")),
+    }
+
+
 api = APIRouter(dependencies=[Depends(require_admin)])
 
 
@@ -188,6 +230,17 @@ CONFIG_FIELDS: list[dict[str, Any]] = [
     {"key": "TELEGRAM_API_BASE", "section": "telegram", "field": "apiBase", "label": "Telegram API 地址", "help": "Bot API 根地址，可填写反代地址。"},
     {"key": "ENABLE_WS_LISTENERS", "section": "app", "field": "enableWsListeners", "label": "实时监听", "help": "是否启动 WebSocket 邮件监听。"},
 ]
+
+CONFIG_FIELDS.insert(
+    -1,
+    {
+        "key": "CLAW_ORIGIN",
+        "section": "claw",
+        "field": "origin",
+        "label": "Claw API 地址",
+        "help": "Claw 官方地址或反代地址，默认 https://claw.163.com。修改后需要重启容器。",
+    },
+)
 
 CONFIG_FIELD_MAP = {item["key"]: item for item in CONFIG_FIELDS}
 
@@ -274,6 +327,7 @@ def _config_item_value(meta: dict[str, Any], data: dict[str, Any]) -> tuple[Any,
         "TELEGRAM_BOT_TOKEN": settings.telegram_bot_token,
         "TELEGRAM_CHAT_ID": settings.telegram_chat_id,
         "TELEGRAM_API_BASE": settings.telegram_api_base,
+        "CLAW_ORIGIN": settings.claw_origin,
         "ENABLE_WS_LISTENERS": settings.enable_ws_listeners,
     }.get(meta["key"])
     return runtime_value, bool(runtime_value not in (None, ""))
@@ -317,6 +371,7 @@ def _apply_runtime_config(updates: dict[str, Any]) -> None:
         "TELEGRAM_BOT_TOKEN": ("telegram_bot_token", lambda v: v if v else None),
         "TELEGRAM_CHAT_ID": ("telegram_chat_id", lambda v: v if v else None),
         "TELEGRAM_API_BASE": ("telegram_api_base", lambda v: v if v else None),
+        "CLAW_ORIGIN": ("claw_origin", lambda v: (v or "https://claw.163.com").rstrip("/")),
         "ENABLE_WS_LISTENERS": ("enable_ws_listeners", bool),
     }
     for key, value in updates.items():
@@ -515,15 +570,56 @@ async def accounts_delete(account_id: int) -> dict[str, bool]:
 @api.get("/mailboxes")
 async def mailboxes(sync: str | None = None, account_id: int | None = None) -> dict[str, Any]:
     db.seed_env_account()
+    sync_results: list[dict[str, Any]] = []
     if sync == "true":
         accounts = [require_account(account_id)] if account_id else db.list_accounts(active_only=True)
         for account in accounts:
             if account.get("workspace_id") and account.get("dashboard_cookie"):
-                await sync_account_mailboxes(account["id"])
+                try:
+                    count = await sync_account_mailboxes(account["id"])
+                    updated = db.get_account(account["id"]) or account
+                    sync_results.append({**mailbox_sync_summary(updated), "synced": count, "success": True})
+                    print(f"[sync:{updated.get('name') or updated.get('user_email')}] mailboxes={count}")
+                except Exception as exc:
+                    sync_results.append({**mailbox_sync_summary(account), "success": False, "error": str(exc)})
+                    print(f"[sync:{account.get('name') or account.get('user_email')}] {exc}")
             else:
-                print(f"[sync:{account.get('name') or account.get('user_email')}] skipped: workspace_id/dashboard_cookie missing")
+                error = "workspace_id/dashboard_cookie missing"
+                sync_results.append({**mailbox_sync_summary(account), "success": False, "error": error})
+                print(f"[sync:{account.get('name') or account.get('user_email')}] skipped: {error}")
     db.cleanup_account_root_mailboxes()
-    return {"items": db.list_mailboxes(account_id=account_id)}
+    return {"items": db.list_mailboxes(account_id=account_id), "sync": sync_results}
+
+
+@api.get("/diagnostics/claw")
+async def claw_diagnostics() -> dict[str, Any]:
+    db.seed_env_account()
+    items: list[dict[str, Any]] = []
+    for account in db.list_accounts(active_only=True):
+        item = mailbox_sync_summary(account)
+        if account.get("workspace_id") and account.get("dashboard_cookie"):
+            try:
+                remote = await list_dashboard_mailboxes(account["id"])
+                item = mailbox_sync_summary(account, remote)
+                item["remoteSamples"] = [
+                    {
+                        "id": mailbox.get("id"),
+                        "email": _mask_email(mailbox.get("email")),
+                        "prefix": mailbox.get("prefix"),
+                        "type": mailbox.get("mailbox_type"),
+                        "status": mailbox.get("status"),
+                    }
+                    for mailbox in remote[:20]
+                ]
+                item["success"] = True
+            except Exception as exc:
+                item["success"] = False
+                item["error"] = str(exc)
+        else:
+            item["success"] = False
+            item["error"] = "workspace_id/dashboard_cookie missing"
+        items.append(item)
+    return {"items": items}
 
 
 @api.post("/mailboxes")

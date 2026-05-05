@@ -7,9 +7,10 @@ from typing import Any, AsyncIterator
 
 import httpx
 
+from .config import settings
 from .runtime_config import require_mail_account
 
-CLAW_ORIGIN = "https://claw.163.com"
+CLAW_ORIGIN = settings.claw_origin.rstrip("/")
 TOKEN_URL = f"{CLAW_ORIGIN}/claw-api-gateway/open/v1/mail/auth/token"
 IM_TOKEN_URL = f"{CLAW_ORIGIN}/claw-api-gateway/open/v1/mail/auth/im-token"
 
