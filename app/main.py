@@ -21,6 +21,7 @@ from .claw_dashboard import (
     list_api_keys,
     list_dashboard_mailboxes,
     list_workspaces,
+    primary_mailbox_from_items,
     send_login_code,
     update_mailbox_communication_settings,
     verify_login_code,
@@ -349,12 +350,14 @@ async def sync_account_mailboxes(account_id: int) -> int:
     account = db.get_account(account_id)
     remote = await list_dashboard_mailboxes(account_id)
     if account:
-        root_prefix = (account.get("root_prefix") or "").strip().lower()
-        domain = (account.get("domain") or "claw.163.com").strip().lower()
-        root_email = f"{root_prefix}@{domain}" if root_prefix else ""
-        primary = next((item for item in remote if item.get("email", "").strip().lower() == root_email), None)
-        if primary and primary.get("id") != account.get("parent_mailbox_id"):
-            db.update_account(account_id, {"parent_mailbox_id": primary["id"]})
+        primary = primary_mailbox_from_items(account, remote)
+        if primary:
+            primary_email = (primary.get("email") or "").strip().lower()
+            patch: dict[str, Any] = {"parent_mailbox_id": primary["id"]}
+            if "@" in primary_email:
+                root_prefix, domain = primary_email.split("@", 1)
+                patch.update({"root_prefix": root_prefix, "domain": domain, "user_email": primary_email})
+            db.update_account(account_id, patch)
     for item in remote:
         row = db.upsert_mailbox(item)
         start_mailbox_listener(row)

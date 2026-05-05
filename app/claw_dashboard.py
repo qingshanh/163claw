@@ -50,6 +50,7 @@ def normalize_mailbox(raw: dict[str, Any], account_id: int | None = None) -> dic
         "prefix": str(raw.get("prefix") or email.split("@")[0]),
         "display_name": raw.get("displayName") or raw.get("display_name"),
         "account_id": account_id,
+        "mailbox_type": raw.get("mailboxType") or raw.get("mailbox_type"),
         "status": raw.get("status") or "active",
         "openclaw_status": raw.get("openclawStatus") or raw.get("openclaw_status"),
         "install_command": install_command,
@@ -58,6 +59,41 @@ def normalize_mailbox(raw: dict[str, Any], account_id: int | None = None) -> dic
         "ext_receive_type": _optional_number(raw.get("extReceiveType") or raw.get("ext_receive_type")),
         "ext_send_type": _optional_number(raw.get("extSendType") or raw.get("ext_send_type")),
     }
+
+
+def _flatten_mailboxes(raw: Any) -> list[dict[str, Any]]:
+    if not isinstance(raw, dict):
+        return []
+    items = [raw]
+    for child in raw.get("subMailboxes") or raw.get("sub_mailboxes") or []:
+        items.extend(_flatten_mailboxes(child))
+    return items
+
+
+def _root_email(account: dict[str, Any]) -> str | None:
+    root_prefix = str(account.get("root_prefix") or "").strip().lower()
+    domain = str(account.get("domain") or "claw.163.com").strip().lower()
+    if root_prefix:
+        return f"{root_prefix}@{domain}"
+    user_email = str(account.get("user_email") or "").strip().lower()
+    return user_email if user_email.endswith(f"@{domain}") else None
+
+
+def primary_mailbox_from_items(account: dict[str, Any], items: list[dict[str, Any]]) -> dict[str, Any] | None:
+    root_email = _root_email(account)
+    primary = next((item for item in items if str(item.get("mailbox_type") or "").lower() == "primary"), None)
+    if primary:
+        return primary
+    if root_email:
+        primary = next((item for item in items if str(item.get("email") or "").strip().lower() == root_email), None)
+        if primary:
+            return primary
+    root_prefix = str(account.get("root_prefix") or "").strip().lower()
+    if root_prefix:
+        primary = next((item for item in items if str(item.get("prefix") or "").strip().lower() == root_prefix), None)
+        if primary:
+            return primary
+    return items[0] if items else None
 
 
 async def parse_dashboard_response(response: httpx.Response) -> Any:
@@ -150,8 +186,7 @@ async def list_dashboard_mailboxes(account_id: int | None = None) -> list[dict[s
     result = await parse_dashboard_response(response)
     raw_items: list[dict[str, Any]] = []
     if isinstance(result, dict) and result.get("mailbox"):
-        raw_items.append(result["mailbox"])
-        raw_items.extend(result["mailbox"].get("subMailboxes") or [])
+        raw_items = _flatten_mailboxes(result["mailbox"])
     elif isinstance(result, dict):
         raw_items = result.get("items") or result.get("list") or result.get("mailboxes") or []
     elif isinstance(result, list):
@@ -173,6 +208,11 @@ async def create_mailbox(suffix: str, account_id: int | None = None) -> dict[str
             "displayName": normalized,
             "status": "active",
         }, account["id"])
+    remote_items = await list_dashboard_mailboxes(account["id"])
+    primary = primary_mailbox_from_items(account, remote_items)
+    parent_mailbox_id = (primary or {}).get("id") or account.get("parent_mailbox_id")
+    if not parent_mailbox_id:
+        raise RuntimeError("primary mailbox id is required for mailbox creation; sync the account first")
     async with httpx.AsyncClient(timeout=30) as client:
         response = await client.post(
             f"{BASE_URL}/mailboxes",
@@ -182,7 +222,7 @@ async def create_mailbox(suffix: str, account_id: int | None = None) -> dict[str
                 "displayName": normalized,
                 "mailboxType": "sub",
                 "workspaceId": account.get("workspace_id"),
-                "parentMailboxId": account.get("parent_mailbox_id"),
+                "parentMailboxId": parent_mailbox_id,
             },
         )
     return normalize_mailbox(await parse_dashboard_response(response), account["id"])
