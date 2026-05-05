@@ -1,0 +1,35 @@
+{
+  "app": {
+    "nodeEnv": "production",
+    "port": 3000,
+    "adminPassword": "change-me",
+    "databasePath": "./data/app.db",
+    "staticDir": "./dist/web",
+    "enableWsListeners": true
+  },
+  "telegram": {
+    "enabled": false,
+    "botToken": "",
+    "chatId": "",
+    "apiBase": "https://api.telegram.org"
+  },
+  "accounts": [
+    {
+      "name": "main-account",
+      "user": "your_root@claw.163.com",
+      "registeredEmail": "your_mail@example.com",
+      "apiKey": "ck_live_xxx",
+      "dashboardCookie": "CLAW_SESS=xxx",
+      "workspaceId": "workspace_id",
+      "parentMailboxId": "parent_mailbox_id",
+      "rootPrefix": "your_root",
+      "domain": "claw.163.com",
+      "telegramEnabled": false,
+      "telegramBotToken": "",
+      "telegramChatId": "",
+      "telegramApiBase": "https://api.telegram.org",
+      "sortOrder": 0,
+      "isActive": true
+    }
+  ]
+}

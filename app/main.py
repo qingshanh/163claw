@@ -35,7 +35,7 @@ from .claw_mail import (
     reset_mail_clients,
     send_mail as claw_send_mail,
 )
-from .config import ENV_FILE, PROJECT_ROOT, settings
+from .config import CONFIG_FILE, read_config_file, save_config_file, settings
 from .listener_manager import (
     listener_snapshot,
     start_all_mailbox_listeners,
@@ -90,9 +90,11 @@ def require_admin(
 
 
 def public_account(account: dict[str, Any]) -> dict[str, Any]:
-    effective_telegram_enabled = bool(account.get("telegram_enabled")) or settings.telegram_enabled
+    has_account_telegram = bool(account.get("telegram_enabled"))
+    has_global_telegram = bool(settings.telegram_enabled)
+    effective_telegram_enabled = has_account_telegram or has_global_telegram
     effective_telegram_chat_id = account.get("telegram_chat_id") or settings.telegram_chat_id
-    effective_telegram_api_base = settings.telegram_api_base or account.get("telegram_api_base")
+    effective_telegram_api_base = account.get("telegram_api_base") or settings.telegram_api_base
     has_telegram_token = bool(account.get("telegram_bot_token") or settings.telegram_bot_token)
     return {
         **account,
@@ -106,10 +108,10 @@ def public_account(account: dict[str, Any]) -> dict[str, Any]:
         "telegram_api_base": effective_telegram_api_base,
         "has_telegram_bot_token_value": has_telegram_token,
         "config_sources": {
-            "telegram_enabled": "env" if settings.telegram_enabled and not account.get("telegram_enabled") else "account",
-            "telegram_bot_token": "env" if settings.telegram_bot_token and not account.get("telegram_bot_token") else "account",
-            "telegram_chat_id": "env" if settings.telegram_chat_id and not account.get("telegram_chat_id") else "account",
-            "telegram_api_base": "env",
+            "telegram_enabled": "global" if not has_account_telegram and has_global_telegram else "account",
+            "telegram_bot_token": "global" if settings.telegram_bot_token and not account.get("telegram_bot_token") else "account",
+            "telegram_chat_id": "global" if settings.telegram_chat_id and not account.get("telegram_chat_id") else "account",
+            "telegram_api_base": "global" if settings.telegram_api_base and not account.get("telegram_api_base") else "account",
         },
         "status": account_status(account),
     }
@@ -157,45 +159,39 @@ class AccountPatch(BaseModel):
 
 
 ACCOUNT_FIELD_HELP = {
-    "name": "面板显示名，便于区分多个 Claw 主账号。",
+    "name": "主账号显示名，用于区分多个 Claw 主账号。",
     "user_email": "Claw 主邮箱地址，必须是 @claw.163.com 后缀；注册邮箱会单独显示。",
-    "registered_email": "注册/登录 Claw 控制台用的邮箱，比如 huihlance@163.com，仅作备注显示。",
-    "api_key": "Claw API Key，通常 ck_live_ 开头；用于收信、发信、回复、附件和监听。",
-    "dashboard_cookie": "Claw 控制台登录 Cookie；用于同步邮箱树、创建/删除子邮箱。",
-    "workspace_id": "Claw 工作区 ID；从 /api/v1/workspaces 响应里获取。",
-    "parent_mailbox_id": "主邮箱 ID；从 /api/v1/mailboxes?workspaceId=... 响应的 result.mailbox.id 获取。",
-    "root_prefix": "主邮箱 @ 前缀，例如 lanceagent；创建子邮箱会拼成 lanceagent.xxx@claw.163.com。",
+    "registered_email": "注册/登录 Claw 控制台使用的邮箱，例如 mail@example.com，仅作备注显示。",
+    "api_key": "Claw API Key，通常以 ck_live_ 开头；用于收信、发信、回复、附件和监听。",
+    "dashboard_cookie": "Claw 控制台登录 Cookie，用于同步邮箱树、创建和删除子邮箱。",
+    "workspace_id": "Claw 工作区 ID，从工作区接口返回里获取。",
+    "parent_mailbox_id": "主邮箱 ID，从工作区邮箱列表接口里获取。",
+    "root_prefix": "主邮箱 @ 前缀，例如 root；子邮箱会拼成 root.xxx@claw.163.com。",
     "domain": "邮箱域名，通常是 claw.163.com。",
-    "telegram_enabled": "是否开启该账号的新邮件 Telegram 推送。",
+    "telegram_enabled": "是否启用该账号的新邮件 Telegram 推送。",
     "telegram_bot_token": "Telegram Bot Token，可从 BotFather 获取。",
     "telegram_chat_id": "接收通知的 Telegram chat_id。",
-    "telegram_api_base": "Telegram Bot API 地址，可填反代地址；未单独配置时读取 .env 的 TELEGRAM_API_BASE。",
+    "telegram_api_base": "Telegram Bot API 地址，可填写反代地址。",
     "sort_order": "主账号显示顺序，数字越小越靠前。",
 }
 
-
-ENV_FIELDS: list[dict[str, Any]] = [
-    {"key": "NODE_ENV", "label": "运行模式", "help": "production 使用 dist/web 静态文件；development 可配合 Vite 开发。"},
-    {"key": "PORT", "label": "服务端口", "help": "FastAPI 启动端口；修改后需要重启服务才会换端口。"},
-    {"key": "ADMIN_PASSWORD", "label": "管理密码", "secret": True, "help": "进入面板和调用 API 使用的密码。留空保存不会覆盖。"},
-    {"key": "CLAW_ACCOUNTS_JSON", "label": "账号 JSON 路径", "help": "多主账号配置文件路径；相对路径按项目根目录解析。"},
-    {"key": "CLAW_API_KEY", "label": "单账号 API Key", "secret": True, "help": "不使用 JSON 时的单账号 Claw API Key。"},
-    {"key": "CLAW_DASHBOARD_COOKIE", "label": "单账号 Dashboard Cookie", "secret": True, "textarea": True, "help": "不使用 JSON 时的单账号控制台 Cookie。"},
-    {"key": "CLAW_WORKSPACE_ID", "label": "单账号 Workspace ID", "help": "不使用 JSON 时的单账号工作区 ID。"},
-    {"key": "CLAW_PARENT_MAILBOX_ID", "label": "单账号主邮箱 ID", "help": "不使用 JSON 时的单账号主邮箱 ID。"},
-    {"key": "CLAW_ROOT_PREFIX", "label": "单账号主邮箱前缀", "help": "不使用 JSON 时的主邮箱 @ 前缀。"},
-    {"key": "CLAW_DOMAIN", "label": "Claw 域名", "help": "通常为 claw.163.com。"},
-    {"key": "TELEGRAM_ENABLED", "label": "全局电报通知", "help": "开启后，未单独配置的账号也会使用全局 Telegram 配置。"},
-    {"key": "TELEGRAM_BOT_TOKEN", "label": "全局 Bot Token", "secret": True, "help": "全局 Telegram Bot Token。留空保存不会覆盖。"},
-    {"key": "TELEGRAM_CHAT_ID", "label": "全局 Chat ID", "help": "全局 Telegram 接收账号或群组 chat_id。"},
-    {"key": "TELEGRAM_API_BASE", "label": "Telegram API 地址", "help": "Bot API 根地址，可填反代地址，例如 https://tg.example.com。"},
-    {"key": "ENABLE_WS_LISTENERS", "label": "实时监听", "help": "是否启动 WebSocket 邮件监听。"},
-    {"key": "DATABASE_PATH", "label": "数据库路径", "help": "SQLite 数据库路径；相对路径按项目根目录解析。"},
-    {"key": "STATIC_DIR", "label": "静态文件目录", "help": "前端构建目录；相对路径按项目根目录解析。"},
+CONFIG_FIELDS: list[dict[str, Any]] = [
+    {"key": "NODE_ENV", "section": "app", "field": "nodeEnv", "label": "运行模式", "help": "production 使用 dist/web 静态文件；development 适合本地开发。"},
+    {"key": "PORT", "section": "app", "field": "port", "label": "服务端口", "help": "FastAPI 监听端口。改动后通常需要重启容器或进程。"},
+    {"key": "ADMIN_PASSWORD", "section": "app", "field": "adminPassword", "label": "管理密码", "secret": True, "help": "登录面板和调用 API 使用的密码。留空不会覆盖现有值。"},
+    {"key": "DATABASE_PATH", "section": "app", "field": "databasePath", "label": "数据库路径", "help": "SQLite 数据库文件路径，支持相对路径。"},
+    {"key": "STATIC_DIR", "section": "app", "field": "staticDir", "label": "静态目录", "help": "前端构建产物目录，支持相对路径。"},
+    {"key": "TELEGRAM_ENABLED", "section": "telegram", "field": "enabled", "label": "Telegram 推送", "help": "开启后，未单独配置的账号会使用全局 Telegram 设置。"},
+    {"key": "TELEGRAM_BOT_TOKEN", "section": "telegram", "field": "botToken", "label": "全局 Bot Token", "secret": True, "help": "全局 Telegram Bot Token。留空不会覆盖现有值。"},
+    {"key": "TELEGRAM_CHAT_ID", "section": "telegram", "field": "chatId", "label": "全局 Chat ID", "help": "全局 Telegram 接收账号或群组 chat_id。"},
+    {"key": "TELEGRAM_API_BASE", "section": "telegram", "field": "apiBase", "label": "Telegram API 地址", "help": "Bot API 根地址，可填写反代地址。"},
+    {"key": "ENABLE_WS_LISTENERS", "section": "app", "field": "enableWsListeners", "label": "实时监听", "help": "是否启动 WebSocket 邮件监听。"},
 ]
 
+CONFIG_FIELD_MAP = {item["key"]: item for item in CONFIG_FIELDS}
 
-class EnvConfigPatch(BaseModel):
+
+class ConfigPatch(BaseModel):
     values: dict[str, str | bool | int | None]
 
 
@@ -248,62 +244,82 @@ class ClawVerifyInput(BaseModel):
     telegramApiBase: str | None = None
 
 
-def _read_env_values() -> dict[str, str]:
-    values: dict[str, str] = {}
-    if ENV_FILE.exists():
-        for line in ENV_FILE.read_text(encoding="utf-8").splitlines():
-            raw = line.strip()
-            if not raw or raw.startswith("#") or "=" not in raw:
-                continue
-            key, value = raw.split("=", 1)
-            values[key.strip()] = value.strip().strip('"').strip("'")
-    return values
+def _config_data() -> dict[str, Any]:
+    data = read_config_file(CONFIG_FILE)
+    return data if isinstance(data, dict) else {}
 
 
-def _write_env_values(updates: dict[str, str]) -> None:
-    existing = ENV_FILE.read_text(encoding="utf-8").splitlines() if ENV_FILE.exists() else []
-    seen: set[str] = set()
-    out: list[str] = []
-    for line in existing:
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#") or "=" not in stripped:
-            out.append(line)
-            continue
-        key = stripped.split("=", 1)[0].strip()
-        if key in updates:
-            out.append(f"{key}={updates[key]}")
-            seen.add(key)
-        else:
-            out.append(line)
-    for key, value in updates.items():
-        if key not in seen:
-            out.append(f"{key}={value}")
-    ENV_FILE.write_text("\n".join(out).rstrip() + "\n", encoding="utf-8")
+def _config_section(data: dict[str, Any], name: str) -> dict[str, Any]:
+    section = data.get(name)
+    if not isinstance(section, dict):
+        section = {}
+        data[name] = section
+    return section
 
 
-def _apply_runtime_env(updates: dict[str, str]) -> None:
-    for key, value in updates.items():
-        os.environ[key] = value
+def _config_item_value(meta: dict[str, Any], data: dict[str, Any]) -> tuple[Any, bool]:
+    section = _config_section(data, meta["section"])
+    field = meta["field"]
+    configured = field in section and section[field] not in (None, "")
+    if configured:
+        return section[field], True
+    runtime_value = {
+        "NODE_ENV": settings.node_env,
+        "PORT": settings.port,
+        "ADMIN_PASSWORD": settings.admin_password,
+        "DATABASE_PATH": settings.database_path,
+        "STATIC_DIR": settings.static_dir,
+        "TELEGRAM_ENABLED": settings.telegram_enabled,
+        "TELEGRAM_BOT_TOKEN": settings.telegram_bot_token,
+        "TELEGRAM_CHAT_ID": settings.telegram_chat_id,
+        "TELEGRAM_API_BASE": settings.telegram_api_base,
+        "ENABLE_WS_LISTENERS": settings.enable_ws_listeners,
+    }.get(meta["key"])
+    return runtime_value, bool(runtime_value not in (None, ""))
+
+
+def _public_config() -> dict[str, Any]:
+    data = _config_data()
+    items: list[dict[str, Any]] = []
+    for meta in CONFIG_FIELDS:
+        value, configured = _config_item_value(meta, data)
+        items.append(
+            {
+                **meta,
+                "value": "" if meta.get("secret") else ("" if value is None else str(value).lower() if isinstance(value, bool) else str(value)),
+                "configured": configured,
+            }
+        )
+    return {"path": str(CONFIG_FILE), "items": items}
+
+
+def _coerce_config_value(meta: dict[str, Any], raw_value: str | bool | int | None) -> Any:
+    if raw_value is None:
+        return None
+    if meta["key"] == "PORT":
+        return int(raw_value)
+    if meta["key"] in {"TELEGRAM_ENABLED", "ENABLE_WS_LISTENERS"}:
+        if isinstance(raw_value, bool):
+            return raw_value
+        return str(raw_value).strip().lower() in {"1", "true", "yes", "on"}
+    return str(raw_value).strip()
+
+
+def _apply_runtime_config(updates: dict[str, Any]) -> None:
     mapping = {
         "NODE_ENV": ("node_env", str),
         "PORT": ("port", int),
         "ADMIN_PASSWORD": ("admin_password", str),
-        "DATABASE_PATH": ("database_path", lambda v: str((PROJECT_ROOT / v) if not Path(v).is_absolute() else Path(v))),
-        "STATIC_DIR": ("static_dir", lambda v: str((PROJECT_ROOT / v) if v and not Path(v).is_absolute() else Path(v)) if v else None),
-        "CLAW_API_KEY": ("claw_api_key", str),
-        "CLAW_DASHBOARD_COOKIE": ("claw_dashboard_cookie", str),
-        "CLAW_WORKSPACE_ID": ("claw_workspace_id", str),
-        "CLAW_PARENT_MAILBOX_ID": ("claw_parent_mailbox_id", str),
-        "CLAW_ROOT_PREFIX": ("claw_root_prefix", str),
-        "CLAW_DOMAIN": ("claw_domain", str),
-        "CLAW_ACCOUNTS_JSON": ("claw_accounts_json", lambda v: str((PROJECT_ROOT / v) if v and not Path(v).is_absolute() else Path(v)) if v else None),
-        "TELEGRAM_BOT_TOKEN": ("telegram_bot_token", str),
-        "TELEGRAM_CHAT_ID": ("telegram_chat_id", str),
-        "TELEGRAM_API_BASE": ("telegram_api_base", str),
-        "TELEGRAM_ENABLED": ("telegram_enabled", lambda v: str(v).lower() in {"1", "true", "yes", "on"}),
-        "ENABLE_WS_LISTENERS": ("enable_ws_listeners", lambda v: str(v).lower() in {"1", "true", "yes", "on"}),
+        "DATABASE_PATH": ("database_path", str),
+        "STATIC_DIR": ("static_dir", lambda v: v if v else None),
+        "TELEGRAM_ENABLED": ("telegram_enabled", bool),
+        "TELEGRAM_BOT_TOKEN": ("telegram_bot_token", lambda v: v if v else None),
+        "TELEGRAM_CHAT_ID": ("telegram_chat_id", lambda v: v if v else None),
+        "TELEGRAM_API_BASE": ("telegram_api_base", lambda v: v if v else None),
+        "ENABLE_WS_LISTENERS": ("enable_ws_listeners", bool),
     }
     for key, value in updates.items():
+        os.environ[key] = "true" if value is True else "false" if value is False else str(value)
         if key not in mapping:
             continue
         attr, cast = mapping[key]
@@ -311,21 +327,6 @@ def _apply_runtime_env(updates: dict[str, str]) -> None:
             setattr(settings, attr, cast(value))
         except Exception:
             pass
-
-
-def _public_env_config() -> dict[str, Any]:
-    env_values = _read_env_values()
-    items = []
-    for meta in ENV_FIELDS:
-        key = meta["key"]
-        value = env_values.get(key, "")
-        secret = bool(meta.get("secret"))
-        items.append({
-            **meta,
-            "value": "" if secret else value,
-            "configured": bool(value),
-        })
-    return {"path": str(ENV_FILE), "items": items}
 
 
 @app.get("/health")
@@ -428,31 +429,39 @@ async def accounts() -> dict[str, Any]:
     return {"items": [public_account(item) for item in items], "help": ACCOUNT_FIELD_HELP}
 
 
+@api.get("/config")
 @api.get("/env-config")
-async def env_config() -> dict[str, Any]:
-    return _public_env_config()
+async def app_config() -> dict[str, Any]:
+    return _public_config()
 
 
+@api.patch("/config")
 @api.patch("/env-config")
-async def env_config_update(body: EnvConfigPatch) -> dict[str, Any]:
-    allowed = {item["key"] for item in ENV_FIELDS}
-    secret = {item["key"] for item in ENV_FIELDS if item.get("secret")}
-    updates: dict[str, str] = {}
+async def app_config_update(body: ConfigPatch) -> dict[str, Any]:
+    data = _config_data()
+    updates: dict[str, Any] = {}
     for key, raw_value in body.values.items():
-        if key not in allowed:
+        meta = CONFIG_FIELD_MAP.get(key)
+        if not meta:
             continue
-        if isinstance(raw_value, bool):
-            value = "true" if raw_value else "false"
-        else:
-            value = "" if raw_value is None else str(raw_value).strip()
-        if key in secret and not value:
+        section = _config_section(data, meta["section"])
+        field = meta["field"]
+        if raw_value is None or raw_value == "":
+            if meta.get("secret"):
+                continue
+            section.pop(field, None)
+            updates[key] = None
             continue
+        value = _coerce_config_value(meta, raw_value)
+        if meta.get("secret") and not value:
+            continue
+        section[field] = value
         updates[key] = value
     if updates:
-        _write_env_values(updates)
-        _apply_runtime_env(updates)
+        save_config_file(data, CONFIG_FILE)
+        _apply_runtime_config(updates)
         db.seed_env_account()
-    return _public_env_config()
+    return _public_config()
 
 
 @api.post("/accounts")
@@ -475,6 +484,20 @@ async def accounts_telegram_test(account_id: int) -> dict[str, bool]:
     if not account:
         raise HTTPException(status_code=404, detail="account not found")
     await send_test_message(account)
+    return {"success": True}
+
+
+@api.post("/config/telegram-test")
+async def config_telegram_test() -> dict[str, bool]:
+    await send_test_message(
+        {
+            "name": "global",
+            "telegram_enabled": True,
+            "telegram_bot_token": settings.telegram_bot_token,
+            "telegram_chat_id": settings.telegram_chat_id,
+            "telegram_api_base": settings.telegram_api_base,
+        }
+    )
     return {"success": True}
 
 

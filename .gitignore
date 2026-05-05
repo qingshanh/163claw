@@ -8,6 +8,7 @@ __pycache__/
 .venv/
 .env
 .env.local
+config.json
 claw_accounts.json
 .codex-run/
 npm-debug.log*

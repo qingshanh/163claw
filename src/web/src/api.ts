@@ -157,11 +157,11 @@ export async function fetchAccounts(): Promise<{ items: Account[]; help: Record<
 }
 
 export async function fetchEnvConfig(): Promise<EnvConfig> {
-  return requestJson<EnvConfig>("/api/env-config");
+  return requestJson<EnvConfig>("/api/config");
 }
 
 export async function updateEnvConfig(values: Record<string, string | boolean>): Promise<EnvConfig> {
-  return requestJson<EnvConfig>("/api/env-config", {
+  return requestJson<EnvConfig>("/api/config", {
     method: "PATCH",
     body: JSON.stringify({ values })
   });
@@ -220,6 +220,12 @@ export async function deleteAccount(id: number): Promise<void> {
 
 export async function testTelegram(accountId: number): Promise<void> {
   await requestJson<{ success: boolean }>(`/api/accounts/${accountId}/telegram-test`, {
+    method: "POST"
+  });
+}
+
+export async function testGlobalTelegram(): Promise<void> {
+  await requestJson<{ success: boolean }>("/api/config/telegram-test", {
     method: "POST"
   });
 }

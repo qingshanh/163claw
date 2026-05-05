@@ -12,6 +12,7 @@ ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 COPY app ./app
+COPY config.example.json ./config.example.json
 COPY --from=web-build /app/dist ./dist
 RUN mkdir -p /app/data
 EXPOSE 3000

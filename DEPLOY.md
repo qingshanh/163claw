@@ -1,6 +1,6 @@
 # VPS 部署
 
-推荐使用 Docker Compose。
+推荐直接用 Docker。
 
 ## 1. 安装依赖
 
@@ -12,32 +12,33 @@ sudo apt install -y git docker.io docker-compose-plugin
 sudo systemctl enable --now docker
 ```
 
-## 2. 获取代码
+## 2. 拉取代码
 
 ```bash
 git clone <your-repo-url> /opt/163claw
 cd /opt/163claw
 ```
 
-## 3. 配置
+## 3. 准备配置
 
 ```bash
-cp .env.example .env
-nano .env
-nano claw_accounts.json
+cp config.example.json config.json
+nano config.json
 ```
 
-确认 `.env` 里的：
+`config.json` 不会被打进镜像，Docker Compose 会在运行时把它挂载进去，面板保存配置也会写回这份文件。
 
-```env
-PORT=3000
-ADMIN_PASSWORD=strong-password
-CLAW_ACCOUNTS_JSON=./claw_accounts.json
-DATABASE_PATH=./data/app.db
-STATIC_DIR=./dist/web
-```
+重点检查：
 
-`claw_accounts.json` 只放主账号，不要上传真实 Cookie、Token。
+- `app.adminPassword`
+- `app.port`
+- `accounts[*].apiKey`
+- `accounts[*].dashboardCookie`
+- `accounts[*].workspaceId`
+- `accounts[*].parentMailboxId`
+- `accounts[*].rootPrefix`
+- `telegram.botToken`
+- `telegram.chatId`
 
 ## 4. 启动
 
@@ -49,7 +50,7 @@ docker compose logs -f
 访问：
 
 ```text
-http://服务器IP:PORT
+http://服务器IP:3000
 ```
 
 ## 5. 更新
@@ -59,7 +60,7 @@ git pull
 docker compose up -d --build
 ```
 
-## 6. 非 Docker 方式
+## 6. 非 Docker
 
 ```bash
 python3 -m venv .venv
@@ -70,28 +71,7 @@ npm run build
 python -m app.run
 ```
 
-可用 systemd 常驻：
+## 7. 注意
 
-```ini
-[Unit]
-Description=Claw Email Web Manager
-After=network.target
-
-[Service]
-WorkingDirectory=/opt/163claw
-Environment=PYTHONUNBUFFERED=1
-ExecStart=/opt/163claw/.venv/bin/python -m app.run
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-```
-
-保存到 `/etc/systemd/system/163claw.service` 后：
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now 163claw
-sudo journalctl -u 163claw -f
-```
+- `config.json`、`.env`、`data/` 不要提交到 GitHub
+- 只保留 `config.example.json` 作为模板

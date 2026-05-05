@@ -35,6 +35,8 @@ def load_accounts_json(path: str | Path) -> list[dict[str, Any]]:
             "telegram_bot_token": raw.get("telegramBotToken") or raw.get("telegram_bot_token"),
             "telegram_chat_id": raw.get("telegramChatId") or raw.get("telegram_chat_id"),
             "telegram_api_base": raw.get("telegramApiBase") or raw.get("telegram_api_base"),
+            "sort_order": raw.get("sortOrder") if "sortOrder" in raw else raw.get("sort_order"),
+            "is_active": raw.get("isActive") if "isActive" in raw else raw.get("is_active", True),
             "users": _users(raw, user),
         })
     return accounts

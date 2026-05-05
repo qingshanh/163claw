@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .account_loader import load_accounts_json
-from .config import settings
+from .config import read_config_file, settings
 
 Path(settings.database_path).parent.mkdir(parents=True, exist_ok=True)
 
@@ -159,6 +159,9 @@ def rows_to_dicts(rows: Iterable[sqlite3.Row]) -> list[dict[str, Any]]:
 def seed_env_account() -> None:
     if settings.claw_accounts_json:
         seed_accounts_json(settings.claw_accounts_json)
+        config_data = read_config_file(settings.claw_accounts_json)
+        if config_data.get("accounts"):
+            return
     if not settings.claw_api_key:
         return
     existing = db.execute("SELECT id FROM accounts WHERE api_key = ? LIMIT 1", (settings.claw_api_key,)).fetchone()
@@ -464,7 +467,7 @@ def create_account(data: dict[str, Any]) -> dict[str, Any]:
                 "telegram_bot_token": data.get("telegram_bot_token"),
                 "telegram_chat_id": data.get("telegram_chat_id"),
                 "telegram_api_base": data.get("telegram_api_base") or settings.telegram_api_base,
-                "sort_order": data.get("sort_order") or next_sort_order(),
+                "sort_order": data["sort_order"] if data.get("sort_order") is not None else next_sort_order(),
                 "is_active": 1 if data.get("is_active", True) else 0,
             },
         )

@@ -15,4 +15,5 @@ npm-debug.log*
 .env
 .env.*
 !.env.example
+config.json
 claw_accounts.json
