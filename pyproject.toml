@@ -1,0 +1,8 @@
+[project]
+name = "claw-email-webapp-python"
+version = "0.2.0"
+description = "Python implementation of the Claw Email web manager."
+requires-python = ">=3.11"
+
+[tool.py_compile]
+modules = ["app"]

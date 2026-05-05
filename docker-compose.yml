@@ -1,0 +1,14 @@
+services:
+  claw-email:
+    image: ghcr.io/wangxingfan/clawemail:latest
+    build: .
+    container_name: claw-email
+    restart: unless-stopped
+    # Host port can be changed freely. Keep the right side equal to PORT in .env.
+    # Example: PORT=8080 and ports "8080:8080".
+    ports:
+      - "${PORT:-3000}:${PORT:-3000}"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
